@@ -1,10 +1,12 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
+
 from core.config import settings
 
 
-_llm = ChatGoogleGenerativeAI(
-    model=settings.llm_model,
-    google_api_key=settings.llm_api_key,
+_llm = ChatGroq(
+    model=settings.groq_model,
+    api_key=settings.groq_api_key,
+    temperature=0.2,
 )
 
 SYSTEM_PROMPT = """You are a document assistant. Answer the user's question using ONLY the provided context.

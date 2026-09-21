@@ -1,12 +1,14 @@
 from uuid import UUID
 from datetime import datetime, timezone
 
+from groq import RateLimitError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 from database.documents import Document, DocumentChunk
 from rag.chains import generate_summary
-from services.exceptions import DocumentNotFound, DocumentNotReady
+from services.exceptions import DocumentNotFound, DocumentNotReady, QuotaExceeded
 
 
 
@@ -25,6 +27,13 @@ async def get_summary(
     if document.status != 'ready':
         raise DocumentNotReady("Document is not ready for summarization")
 
+    if document.summary:
+        return {
+            "document_id": document.id,
+            "summary": document.summary,
+            "source_pages": list(range(1, document.page_count + 1)),
+        }
+
     result = await session.execute(select(DocumentChunk).where(DocumentChunk.document_id == document_id).order_by(DocumentChunk.chunk_index))
     db_chunks = list(result.scalars().all())
 
@@ -39,9 +48,11 @@ async def get_summary(
         for chunk in db_chunks
     ]
 
-
-    summary = await generate_summary(chunks)
-
+    try:
+        summary = await generate_summary(chunks)
+    except RateLimitError as exc:
+        raise QuotaExceeded("AI summary quota exceeded. Please try again later.") from exc
+    
     update_result = await session.execute(update(Document).where(
         Document.id == document_id, 
         Document.owner_id == owner_id,
