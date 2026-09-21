@@ -11,6 +11,11 @@ async def ingest_document(session: AsyncSession, document: Document, pdf_bytes: 
         chunks, page_count = await extract_chunks_from_pdf(pdf_bytes)
         document.page_count = page_count
 
+        if not chunks:
+            raise IngestionFailed(
+                "The PDF contains no extractable text. Scanned or image-only PDFs require OCR before upload."
+            )
+
         db_chunks = [
             DocumentChunk(
                 document_id=document.id,
@@ -37,4 +42,6 @@ async def ingest_document(session: AsyncSession, document: Document, pdf_bytes: 
         session.add(document)
 
         await session.commit()
+        if isinstance(e, IngestionFailed):
+            raise
         raise IngestionFailed(f"Failed to ingest document: {e}") from e

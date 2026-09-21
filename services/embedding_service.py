@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from typing import Sequence
 
@@ -14,17 +15,29 @@ _embeddings = GoogleGenerativeAIEmbeddings(
     google_api_key=settings.llm_api_key,
 )
 
+EMBEDDING_BATCH_SIZE = 32
+
+
 async def embed_chunks(
     chunks: Sequence[DocumentChunk],
     document_id: uuid.UUID,
     owner_id: str,
 ) -> None:
     """Embedded chunk texts and upsert vectors into qrant"""
-    client=get_qdrant_client()
-    points: list[PointStruct] =[]
-    for chunk in chunks:
-        vector = await _embeddings.aembed_query(chunk.content)
-        points.append(
+    valid_chunks = [chunk for chunk in chunks if chunk.content.strip()]
+    if not valid_chunks:
+        raise ValueError("Cannot embed a document without text chunks")
+
+    client = get_qdrant_client()
+    for start in range(0, len(valid_chunks), EMBEDDING_BATCH_SIZE):
+        batch = valid_chunks[start : start + EMBEDDING_BATCH_SIZE]
+        vectors = await _embeddings.aembed_documents(
+            [chunk.content for chunk in batch]
+        )
+        if len(vectors) != len(batch):
+            raise ValueError("Embedding service returned an incomplete batch")
+
+        points = [
             PointStruct(
                 id=str(chunk.id),
                 vector=vector,
@@ -34,11 +47,13 @@ async def embed_chunks(
                     "chunk_id": str(chunk.id),
                     "page_number": chunk.page_number,
                     "text": chunk.content,
-
-                },              
+                },
             )
+            for chunk, vector in zip(batch, vectors, strict=True)
+        ]
+        await asyncio.to_thread(
+            client.upsert,
+            collection_name=settings.qdrant_collection,
+            points=points,
+            wait=True,
         )
-    client.upsert(
-        collection_name=settings.qdrant_collection,
-        points=points,
-    )
