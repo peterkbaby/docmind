@@ -58,12 +58,13 @@ async def upload_document(
     session.add(doc)
     await session.commit()
     await session.refresh(doc)
-    
-    key = f"pdfs/{user_id}/{doc.id}.pdf"
+
+    document_id = doc.id
+    key = f"pdfs/{user_id}/{document_id}.pdf"
     s3_uploaded = False
 
     try:
-        await upload_to_s3(contents, user_id, str(doc.id))
+        await upload_to_s3(contents, user_id, str(document_id))
         s3_uploaded = True
 
         doc.storage_key = key
@@ -82,13 +83,13 @@ async def upload_document(
 
         try:
             delete_document_vectors(
-                document_id=str(doc.id),
+                document_id=str(document_id),
                 owner_id=user_id,
             )
         except Exception:
             logger.exception("Failed to remove vectors after ingestion failure")
 
-        persisted_doc = await session.get(Document, doc.id)
+        persisted_doc = await session.get(Document, document_id)
 
         if persisted_doc is not None:
             await session.delete(persisted_doc)
@@ -98,10 +99,10 @@ async def upload_document(
 
     summary = None
     try:
-        summary = await get_summary(session, document_id=doc.id, owner_id=user_id)
+        summary = await get_summary(session, document_id=document_id, owner_id=user_id)
     except Exception:
         await session.rollback()
-        logger.exception("Summary generation failed for document %s", doc.id)
+        logger.exception("Summary generation failed for document %s", document_id)
 
     await session.refresh(doc)
     return DocumentUploadResponse(data=doc, summary=summary)
