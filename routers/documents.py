@@ -4,8 +4,9 @@
 
 
 import logging
+from urllib.parse import quote
 from uuid import UUID
-from fastapi import APIRouter, File, Request, Depends, UploadFile
+from fastapi import APIRouter, File, Request, Depends, Response, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
 from core.limiter import limiter
@@ -13,9 +14,9 @@ from core.dependencies import get_current_user
 from core.config import settings
 from database.db import get_session
 from database.documents import Document
-from core.storage import delete_from_s3, upload_to_s3
+from core.storage import delete_from_s3, download_from_s3, upload_to_s3
 from services.ingestion_service import ingest_document
-from services.exceptions import FileTooLarge, InvalidFileType, DocumentNotFound, QuotaExceeded
+from services.exceptions import DocumentNotFound, DocumentNotReady, FileTooLarge, InvalidFileType, QuotaExceeded
 from schemas.documents import DocumentListResponse, DocumentResponse, DocumentUploadResponse
 from services.summary_service import get_summary
 from rag.qdrant_store import delete_document_vectors
@@ -136,7 +137,38 @@ async def get_document(
     return document
 
 
-    
+@docs.get("/documents/{document_id}/content")
+@limiter.limit("30/minute")
+async def get_document_content(
+    request: Request,
+    document_id: UUID,
+    user_id: str = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    result = await session.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.owner_id == user_id,
+        )
+    )
+    document = result.scalar_one_or_none()
+    if document is None:
+        raise DocumentNotFound("Document not found")
+    if not document.storage_key:
+        raise DocumentNotReady("Document content is not available")
+
+    content = await download_from_s3(document.storage_key)
+    filename = quote(document.filename)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "Cache-Control": "private, max-age=300",
+        },
+    )
+
+
 @docs.delete("/documents/{document_id}")
 @limiter.limit("20/minute")
 async def delete_document(
