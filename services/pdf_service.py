@@ -23,12 +23,27 @@ async def extract_chunks_from_pdf(
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_file:
         tmp_file.write(pdf_bytes)
         tmp_path = tmp_file.name
-
+        ocr_path = None
+ 
     try:
-        loader = PyPDFLoader(tmp_path)
-        pages = loader.load()
+        pages = PyPDFLoader(tmp_path).load()
+
+        if not any(page.page_content.strip() for page in pages):
+            import ocrmypdf
+
+            ocr_path = tmp_path + ".ocr.pdf"
+            ocrmypdf.ocr(
+                tmp_path,
+                ocr_path,
+                deskew=True,
+                skip_text=True,
+            )
+            pages = PyPDFLoader(ocr_path).load()
     finally:
         os.unlink(tmp_path)
+
+        if ocr_path and os.path.exists(ocr_path):
+            os.unlink(ocr_path)
     
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=size,

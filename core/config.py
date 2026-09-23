@@ -21,7 +21,6 @@ class Settings(BaseSettings):
 
     max_documents_per_user: int = 6
 
-#check
 
     cors_origins: str = "http://localhost:3000"
     embedding_model: str
@@ -32,6 +31,10 @@ class Settings(BaseSettings):
     max_pdf_size_mb: int = 50
 
     debug: bool = False
+
+    redis_url: str = "redis://localhost:6379/0"
+    celery_concurrency: int = 1
+
 
     
     class Config:

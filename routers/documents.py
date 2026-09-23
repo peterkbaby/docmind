@@ -15,10 +15,9 @@ from core.config import settings
 from database.db import get_session
 from database.documents import Document
 from core.storage import delete_from_s3, download_from_s3, upload_to_s3
-from services.ingestion_service import ingest_document
+from services.tasks import process_document
 from services.exceptions import DocumentNotFound, DocumentNotReady, FileTooLarge, InvalidFileType, QuotaExceeded
 from schemas.documents import DocumentListResponse, DocumentResponse, DocumentUploadResponse
-from services.summary_service import get_summary
 from rag.qdrant_store import delete_document_vectors
 
 logger = logging.getLogger(__name__)
@@ -71,8 +70,7 @@ async def upload_document(
         doc.storage_key = key
         await session.commit()
 
-        await ingest_document(session, doc, contents)
-        await session.refresh(doc)
+        process_document.delay(str(document_id))
     except Exception:
         await session.rollback()
 
@@ -98,15 +96,8 @@ async def upload_document(
 
         raise
 
-    summary = None
-    try:
-        summary = await get_summary(session, document_id=document_id, owner_id=user_id)
-    except Exception:
-        await session.rollback()
-        logger.exception("Summary generation failed for document %s", document_id)
-
     await session.refresh(doc)
-    return DocumentUploadResponse(data=doc, summary=summary)
+    return DocumentUploadResponse(data=doc, summary=None)
 
 
 @docs.get("/documents", response_model=DocumentListResponse)
